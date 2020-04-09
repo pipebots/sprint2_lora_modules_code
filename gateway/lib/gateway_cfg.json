@@ -1,0 +1,58 @@
+{
+    "gateway_id": "BB10",
+
+    "ntp_sync_cfg": {
+        "wifi_ssid": "BTHub5-TQH5",
+        "wifi_password": "cdfb2bf634",
+        "ntp_server": "3.uk.pool.ntp.org"
+    },
+
+    "serial_port_config": {
+        "port": 1,
+        "baudrate": 115200,
+        "bytesize": "EIGHTBITS",
+        "parity": "PARITY_NONE",
+        "stopbits": "STOPBITS_ONE",
+        "timeout": "None",
+        "tx_pin": "P3",
+        "rx_pin": "P4"
+    },
+
+    "serial_pkg_format": [
+        "gateway_id",
+        "gateway_time",
+        "lora_rx_time",
+        "lora_rssi",
+        "lora_snr",
+        "wifi_rssi",
+        "wifi_chan",
+        "node_id",
+        "message_type",
+        "reserved",
+        "message_cnt",
+        "message_len",
+        "checksum"
+    ],
+
+    "lora_config": {
+        "mode": "LORA",
+        "region": "EU868",
+        "frequency": 868300000,
+        "tx_power": 10,
+        "bandwidth": "BW_250KHZ",
+        "sf": 7,
+        "coding_rate": "CODING_4_5",
+        "tx_iq": "False",
+        "rx_iq": "True"
+    },
+
+    "lora_pkg_format": {
+        "node_id": "BB",
+        "message_type": "B",
+        "reserved": "BBB",
+        "message_cnt": "BBBB",
+        "message_len": "B",
+        "info_payload": "bb",
+        "checksum": "BBBB"
+    }
+}

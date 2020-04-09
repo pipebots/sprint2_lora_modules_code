@@ -1,0 +1,29 @@
+{
+    "node_id": "AA09",
+
+    "wifi_ssid": "BTHub5-TQH5",
+    "meas_interval_sec": 60,
+    "meas_NA": 127,
+
+    "lora_config": {
+        "mode": "LORA",
+        "region": "EU868",
+        "frequency": 868300000,
+        "tx_power": 10,
+        "bandwidth": "BW_250KHZ",
+        "sf": 7,
+        "coding_rate": "CODING_4_5",
+        "tx_iq": "True",
+        "rx_iq": "False"
+    },
+
+    "lora_pkg_format": {
+        "node_id": "BB",
+        "message_type": "B",
+        "reserved": "BBB",
+        "message_cnt": "BBBB",
+        "message_len": "B",
+        "info_payload": "bb",
+        "checksum": "BBBB"
+    }
+}
