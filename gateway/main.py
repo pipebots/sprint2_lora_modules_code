@@ -93,12 +93,12 @@ def open_lora_socket(lora_config):
     Raises:
         Nothing
     """
-    if lora_config["tx_iq"] == "True":
+    if "True" == lora_config["tx_iq"]:
         tx_iq = True
     else:
         tx_iq = False
 
-    if lora_config["rx_iq"] == "True":
+    if "True" == lora_config["rx_iq"]:
         rx_iq = True
     else:
         rx_iq = False
@@ -198,7 +198,7 @@ def setup_serial_port(serial_port_cfg):
 
     stopbits = {"STOPBITS_ONE": 1, "STOPBITS_TWO": 2}
 
-    if serial_port_cfg["timeout"] == "None":
+    if "None" == serial_port_cfg["timeout"]:
         serial_port_cfg["timeout"] = 2
 
     serial_port = UART(
