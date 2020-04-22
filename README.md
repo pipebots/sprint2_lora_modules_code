@@ -39,6 +39,23 @@ The code uses Pycom's version of `MicroPython` which does not contain **all** fu
 
 The packet structures described in the various JSON files are subject to change as the work on custom PHY and MAC protocols progresses.
 
+### Packet format
+
+As mentioned above, this is preliminary and is subject to change as work progresses. However, currently, the packet format sent over the `LoRa` radio link is, with `msg` short for `message` and `cnt` short for `count`:
+```
++---------+----------+----------+---------+---------+---------+-------+
+| node_id | msg_type | reserved | msg_cnt | msg_len | payload | CRC32 |
++---------+----------+----------+---------+---------+---------+-------+
+```
+The fields are as follows:
+- `node_id` - Two byte unsigned integer. Identifies the transmitter.
+- `msg_type` - One byte unsigned integer. Currently has a fixed magical value of `0xAA`. In the future can be used to differentiate where the `payload` originated from, whether the `payload` is useful data, telemetry, or link control.
+- `reserved` - Three unsigned bytes. In case we have missed something and need to add more functionality.
+- `msg_cnt` - Four byte unsigned integer. Will be used to keep track of lost packets and request re-transmission.
+- `msg_len` - One byte unsigned integer. The length in bytes of the `payload` field.
+- `payload` - **_Currently_** two signed bytes, one for the WLAN RSSI and one for the WLAN channel. **_Will_** change to support more data, up to 241 bytes. The reason for this seemingly random number is that the `LoRa` PHY packet accepts a payload of no more than 256 bytes.
+- `CRC32` - Four byte unsigned integer. A CRC32 checksum.
+
 ## TO DO
 - More checks and validations of various inputs and loaded files such as:
   - Whether all fields are present
