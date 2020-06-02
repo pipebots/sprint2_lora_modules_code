@@ -289,16 +289,15 @@ def run_experiment(lora_msg_buf_ptr):
     global node_cfg
     global message_count
 
-    meas_data = measure_wifi_rssi(wlan_obj,
-                                  node_cfg["wifi_ssid"],
-                                  node_cfg["meas_NA"])
+    meas_data = measure_wifi_rssi(
+        wlan_obj, node_cfg["wifi_ssid"], node_cfg["meas_NA"]
+    )
     if DEBUG_MODE:
         print(meas_data)
 
-    construct_lora_pkg(node_cfg["lora_pkg_format"],
-                       lora_msg_buf_ptr,
-                       message_count,
-                       meas_data)
+    construct_lora_pkg(
+        node_cfg["lora_pkg_format"], lora_msg_buf_ptr, message_count, meas_data
+    )
     if DEBUG_MODE:
         print(lora_msg_buf)
 
@@ -335,7 +334,7 @@ def validate_config(node_cfg):
         "meas_interval_sec",
         "meas_NA",
         "lora_config",
-        "lora_pkg_format"
+        "lora_pkg_format",
     ]
 
     _LORA_FIELDS = [
@@ -347,7 +346,7 @@ def validate_config(node_cfg):
         "sf",
         "coding_rate",
         "tx_iq",
-        "rx_iq"
+        "rx_iq",
     ]
 
     _LORA_PKG_FIELDS = [
@@ -357,7 +356,7 @@ def validate_config(node_cfg):
         "message_cnt",
         "message_len",
         "info_payload",
-        "checksum"
+        "checksum",
     ]
 
     for field in _MAIN_FIELDS:
@@ -384,26 +383,32 @@ def validate_config(node_cfg):
     if "EU868" != node_cfg["lora_config"]["region"]:
         raise ValueError
 
-    if (863000000 > node_cfg["lora_config"]["frequency"]) or \
-       (870000000 < node_cfg["lora_config"]["frequency"]):
+    if (863000000 > node_cfg["lora_config"]["frequency"]) or (
+        870000000 < node_cfg["lora_config"]["frequency"]
+    ):
         raise ValueError
 
-    if (2 > node_cfg["lora_config"]["tx_power"]) or \
-       (14 < node_cfg["lora_config"]["tx_power"]):
+    if (2 > node_cfg["lora_config"]["tx_power"]) or (
+        14 < node_cfg["lora_config"]["tx_power"]
+    ):
         raise ValueError
 
-    if ("BW_125KHZ" != node_cfg["lora_config"]["bandwidth"]) and \
-       ("BW_250KHZ" != node_cfg["lora_config"]["bandwidth"]):
+    if ("BW_125KHZ" != node_cfg["lora_config"]["bandwidth"]) and (
+        "BW_250KHZ" != node_cfg["lora_config"]["bandwidth"]
+    ):
         raise ValueError
 
-    if (7 > node_cfg["lora_config"]["sf"]) or \
-       (12 < node_cfg["lora_config"]["sf"]):
+    if (7 > node_cfg["lora_config"]["sf"]) or (
+        12 < node_cfg["lora_config"]["sf"]
+    ):
         raise ValueError
 
-    if ("CODING_4_5" != node_cfg["lora_config"]["coding_rate"]) and \
-       ("CODING_4_6" != node_cfg["lora_config"]["coding_rate"]) and \
-       ("CODING_4_7" != node_cfg["lora_config"]["coding_rate"]) and \
-       ("CODING_4_8" != node_cfg["lora_config"]["coding_rate"]):
+    if (
+        ("CODING_4_5" != node_cfg["lora_config"]["coding_rate"])
+        and ("CODING_4_6" != node_cfg["lora_config"]["coding_rate"])
+        and ("CODING_4_7" != node_cfg["lora_config"]["coding_rate"])
+        and ("CODING_4_8" != node_cfg["lora_config"]["coding_rate"])
+    ):
         raise ValueError
 
     return True

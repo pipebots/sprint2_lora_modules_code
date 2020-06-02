@@ -57,11 +57,13 @@ The fields are as follows:
 - `CRC32` - Four byte unsigned integer. A CRC32 checksum.
 
 ## TO DO
-- More checks and validations of various inputs and loaded files such as:
-  - Whether all fields are present
-  - Whether the values for those are valid
-  - Type checking of inputs
-- Better error handling - potentially load a default configuration and issue an error message rather than hang up in an infinite loop
+- ~~More checks and validations of various inputs and loaded files such as:~~
+  - ~~Whether all fields are present~~
+  - ~~Whether the values for those are valid~~
+  - ~~Type checking of inputs~~
+  - All of the above are now implemented
+- ~~Better error handling - potentially load a default configuration and issue an error message rather than hang up in an infinite loop~~
+  - Infinite loop actually makes the most sense, so that is how the nodes will perform in case of an error
 - Improve functionality to allow a variable-length payload
 - Create an API to enable transparent use of the LoPy4/FiPy boards by other Themes
 - Add unit and integration testing - difficult due to need for extensive mocking

@@ -462,7 +462,7 @@ def validate_config(gateway_cfg):
         "serial_port_config",
         "serial_pkg_format",
         "lora_config",
-        "lora_pkg_format"
+        "lora_pkg_format",
     ]
 
     _LORA_FIELDS = [
@@ -474,7 +474,7 @@ def validate_config(gateway_cfg):
         "sf",
         "coding_rate",
         "tx_iq",
-        "rx_iq"
+        "rx_iq",
     ]
 
     _LORA_PKG_FIELDS = [
@@ -484,7 +484,7 @@ def validate_config(gateway_cfg):
         "message_cnt",
         "message_len",
         "info_payload",
-        "checksum"
+        "checksum",
     ]
 
     _SERIAL_PORT_FIELDS = [
@@ -495,14 +495,10 @@ def validate_config(gateway_cfg):
         "stopbits",
         "timeout",
         "tx_pin",
-        "rx_pin"
+        "rx_pin",
     ]
 
-    _NTP_FIELDS = [
-        "wifi_ssid",
-        "wifi_password",
-        "ntp_server"
-    ]
+    _NTP_FIELDS = ["wifi_ssid", "wifi_password", "ntp_server"]
 
     for field in _MAIN_FIELDS:
         if field not in gateway_cfg:
@@ -540,26 +536,32 @@ def validate_config(gateway_cfg):
     if "EU868" != gateway_cfg["lora_config"]["region"]:
         raise ValueError
 
-    if (863000000 > gateway_cfg["lora_config"]["frequency"]) or \
-       (870000000 < gateway_cfg["lora_config"]["frequency"]):
+    if (863000000 > gateway_cfg["lora_config"]["frequency"]) or (
+        870000000 < gateway_cfg["lora_config"]["frequency"]
+    ):
         raise ValueError
 
-    if (2 > gateway_cfg["lora_config"]["tx_power"]) or \
-       (14 < gateway_cfg["lora_config"]["tx_power"]):
+    if (2 > gateway_cfg["lora_config"]["tx_power"]) or (
+        14 < gateway_cfg["lora_config"]["tx_power"]
+    ):
         raise ValueError
 
-    if ("BW_125KHZ" != gateway_cfg["lora_config"]["bandwidth"]) and \
-       ("BW_250KHZ" != gateway_cfg["lora_config"]["bandwidth"]):
+    if ("BW_125KHZ" != gateway_cfg["lora_config"]["bandwidth"]) and (
+        "BW_250KHZ" != gateway_cfg["lora_config"]["bandwidth"]
+    ):
         raise ValueError
 
-    if (7 > gateway_cfg["lora_config"]["sf"]) or \
-       (12 < gateway_cfg["lora_config"]["sf"]):
+    if (7 > gateway_cfg["lora_config"]["sf"]) or (
+        12 < gateway_cfg["lora_config"]["sf"]
+    ):
         raise ValueError
 
-    if ("CODING_4_5" != gateway_cfg["lora_config"]["coding_rate"]) and \
-       ("CODING_4_6" != gateway_cfg["lora_config"]["coding_rate"]) and \
-       ("CODING_4_7" != gateway_cfg["lora_config"]["coding_rate"]) and \
-       ("CODING_4_8" != gateway_cfg["lora_config"]["coding_rate"]):
+    if (
+        ("CODING_4_5" != gateway_cfg["lora_config"]["coding_rate"])
+        and ("CODING_4_6" != gateway_cfg["lora_config"]["coding_rate"])
+        and ("CODING_4_7" != gateway_cfg["lora_config"]["coding_rate"])
+        and ("CODING_4_8" != gateway_cfg["lora_config"]["coding_rate"])
+    ):
         raise ValueError
 
     return True
