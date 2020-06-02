@@ -36,6 +36,8 @@ COLOUR_GREEN = micropython.const(0x00FFF00)
 COLOUR_BLUE = micropython.const(0x0000FF)
 COLOUR_OFF = micropython.const(0x000000)
 
+message_count = 0x00000000
+
 
 def flash_led(colour: int = 0x0, period: float = 0.25, times: int = 3) -> None:
     """Flash the on-board RGB LED in a particular pattern
@@ -57,6 +59,7 @@ def flash_led(colour: int = 0x0, period: float = 0.25, times: int = 3) -> None:
     Raises:
         Nothing
     """
+
     for _ in range(times):
         pycom.rgbled(colour)
         time.sleep(period)
@@ -75,8 +78,9 @@ def open_lora_socket(lora_config):
     from string constants to the `LoRa` module numeric constants.
 
     Note:
-        The socket is opened in non-blocking mode. Potentially subject to
-        change in future releases.
+        The socket is opened in blocking mode. Potentially subject to change
+        in future releases. Blocking mode waits for data to be transmitted
+        before continuing execution.
 
     Args:
         lora_config: A `Dict` with all the necessary parameters, loaded from
@@ -91,12 +95,13 @@ def open_lora_socket(lora_config):
     Raises:
         Nothing
     """
-    if "True" == lora_config["tx_iq"]:
+
+    if "true" == lora_config["tx_iq"].lower():
         tx_iq = True
     else:
         tx_iq = False
 
-    if "True" == lora_config["rx_iq"]:
+    if "true" == lora_config["rx_iq"].lower():
         rx_iq = True
     else:
         rx_iq = False
@@ -114,42 +119,9 @@ def open_lora_socket(lora_config):
     )
 
     lora_socket = socket.socket(socket.AF_LORA, socket.SOCK_RAW)
-    lora_socket.setblocking(False)
+    lora_socket.setblocking(True)
 
-    return lora_obj, lora_socket
-
-
-def measure_wifi_rssi(node_cfg, wlan_obj, wlan_ssid):
-    """Measures the RSSI of a specified WLAN SSID
-
-    This is used as a rudimentary propagation measurement experiment. We meas-
-    ure the Received Signal Strength Indicator (RSSI) of a specified WLAN, as
-    well as the channel that the SSID is advertised on. We do not have to be
-    connected to the WLAN to take those measurements.
-
-    Args:
-        node_cfg: A `Dict` with some configuration parameters for the Pycom
-                  node this is running on. Important is the 'meas_NA' value,
-                  which is returned in case the specified WLAN SSID cannot
-                  be detected.
-        wlan_obj: A `WLAN` class giving access to the WLAN radio on-board and
-                  the results from scanning for available WLANs.
-        wlan_ssid: A `str` representing the WLAN SSID we are interested in.
-
-    Returns:
-        A `tuple` with the results of the measurements - the RSSI value and
-        the frequency channel. If the specified SSID is not found in the scan
-        results, a predefined value is returned.
-
-    Raises:
-        Nothing
-    """
-    wlan_networks = wlan_obj.scan()
-    for wlan_network in wlan_networks:
-        if wlan_ssid in wlan_network:
-            return (wlan_network.rssi, wlan_network.channel)
-
-    return (node_cfg["meas_NA"], node_cfg["meas_NA"])
+    return (lora_obj, lora_socket)
 
 
 def construct_lora_pkg_format(lora_pkg_cfg):
@@ -177,6 +149,7 @@ def construct_lora_pkg_format(lora_pkg_cfg):
     Raises:
         Nothing
     """
+
     header_fmt_string = "".join(
         [
             lora_pkg_cfg["node_id"],
@@ -223,6 +196,7 @@ def construct_lora_pkg(lora_pkg_cfg, lora_msg_buf, message_count, payload):
     Raises:
         Nothing
     """
+
     # * This adds padding zeroes for low values of `message_count` in order to
     # * fill four bytes worth of data.
     message_count_hex = "{:>08}".format(hex(message_count)[2:])
@@ -255,14 +229,46 @@ def construct_lora_pkg(lora_pkg_cfg, lora_msg_buf, message_count, payload):
     )
 
 
+def measure_wifi_rssi(wlan_obj, wlan_ssid, missing_value):
+    """Measures the RSSI of a specified WLAN SSID
+
+    This is used as a rudimentary propagation measurement experiment. We meas-
+    ure the Received Signal Strength Indicator (RSSI) of a specified WLAN, as
+    well as the channel that the SSID is advertised on. We do not have to be
+    connected to the WLAN to take those measurements.
+
+    Args:
+        wlan_obj: A `WLAN` class giving access to the WLAN radio on-board and
+                  the results from scanning for available WLANs.
+        wlan_ssid: A `str` representing the WLAN SSID we are interested in.
+        missing_value: An `Int` value, which is returned in case the specified
+                       WLAN SSID cannot be detected.
+
+    Returns:
+        A `tuple` with the results of the measurements - the RSSI value and
+        the frequency channel. If the specified SSID is not found in the scan
+        results, a predefined value is returned.
+
+    Raises:
+        Nothing
+    """
+
+    wlan_networks = wlan_obj.scan()
+    for wlan_network in wlan_networks:
+        if wlan_ssid in wlan_network:
+            return (wlan_network.rssi, wlan_network.channel)
+
+    return (missing_value, missing_value)
+
+
 def run_experiment(lora_msg_buf_ptr):
     """Main function of the Sprint 2 LoRa experiment - node
 
-    This function is called every 'meas_interval_sec' number of seconds, as
-    defined in the 'node_cfg' JSON file. It explicitly defines the variables
+    This function is called every `meas_interval_sec` number of seconds, as
+    defined in the `node_cfg` JSON file. It explicitly defines the variables
     it is going to use as global to help traceability and debugging. The body
-    of the function takes a WLAN RSSI and channel measurement, packs those
-    into a RAW LoRa packet, and transmits it over the air.
+    of the function takes a WLAN RSSI and channel number measurement, packs
+    those into a RAW LoRa packet, and transmits it over the air.
 
     Note:
         The callback mechanism allows for a single argument to be passed to
@@ -278,25 +284,129 @@ def run_experiment(lora_msg_buf_ptr):
     Raises:
         Nothing
     """
-    global wlan_ssid
+
     global lora_socket
     global node_cfg
     global message_count
 
-    meas_data = measure_wifi_rssi(node_cfg, wlan_obj, wlan_ssid)
+    meas_data = measure_wifi_rssi(wlan_obj,
+                                  node_cfg["wifi_ssid"],
+                                  node_cfg["meas_NA"])
     if DEBUG_MODE:
         print(meas_data)
 
-    construct_lora_pkg(
-        node_cfg["lora_pkg_format"], lora_msg_buf_ptr, message_count, meas_data
-    )
+    construct_lora_pkg(node_cfg["lora_pkg_format"],
+                       lora_msg_buf_ptr,
+                       message_count,
+                       meas_data)
     if DEBUG_MODE:
         print(lora_msg_buf)
 
     lora_socket.send(lora_msg_buf_ptr)
+
     message_count += 1
 
     machine.idle()
+
+
+def validate_config(node_cfg):
+    """Perform validation of JSON config file
+
+    This does a quick check if all necessary fields were present in the JSON
+    configuration file. There is also a series of checks if the values for the
+    LoRa configuration are correct. Perhaps overkill, but better safe than
+    sorry.
+
+    Args:
+        node_cfg: A `Dict` with the configuration settings for the LoRa node
+
+    Returns:
+        True if all checks pass
+
+    Raises:
+        KeyError: If at least one configuration parameter was not present
+        ValueError: If there is an incorrect value for the LoRa configuration,
+                    or if any of the other parameters were empty/null.
+    """
+
+    _MAIN_FIELDS = [
+        "node_id",
+        "wifi_ssid",
+        "meas_interval_sec",
+        "meas_NA",
+        "lora_config",
+        "lora_pkg_format"
+    ]
+
+    _LORA_FIELDS = [
+        "mode",
+        "region",
+        "frequency",
+        "tx_power",
+        "bandwidth",
+        "sf",
+        "coding_rate",
+        "tx_iq",
+        "rx_iq"
+    ]
+
+    _LORA_PKG_FIELDS = [
+        "node_id",
+        "message_type",
+        "reserved",
+        "message_cnt",
+        "message_len",
+        "info_payload",
+        "checksum"
+    ]
+
+    for field in _MAIN_FIELDS:
+        if field not in node_cfg:
+            raise KeyError
+        if node_cfg[field] is None:
+            raise ValueError
+
+    for field in _LORA_FIELDS:
+        if field not in node_cfg["lora_config"]:
+            raise KeyError
+        if node_cfg["lora_config"][field] is None:
+            raise ValueError
+
+    for field in _LORA_PKG_FIELDS:
+        if field not in node_cfg["lora_pkg_format"]:
+            raise KeyError
+        if node_cfg["lora_pkg_format"][field] is None:
+            raise ValueError
+
+    if "LORA" != node_cfg["lora_config"]["mode"]:
+        raise ValueError
+
+    if "EU868" != node_cfg["lora_config"]["region"]:
+        raise ValueError
+
+    if (863000000 > node_cfg["lora_config"]["frequency"]) or \
+       (870000000 < node_cfg["lora_config"]["frequency"]):
+        raise ValueError
+
+    if (2 > node_cfg["lora_config"]["tx_power"]) or \
+       (14 < node_cfg["lora_config"]["tx_power"]):
+        raise ValueError
+
+    if ("BW_125KHZ" != node_cfg["lora_config"]["bandwidth"]) and \
+       ("BW_250KHZ" != node_cfg["lora_config"]["bandwidth"]):
+        raise ValueError
+
+    if (7 > node_cfg["lora_config"]["sf"]) or \
+       (12 < node_cfg["lora_config"]["sf"]):
+        raise ValueError
+
+    if ("CODING_4_5" != node_cfg["lora_config"]["coding_rate"]) and \
+       ("CODING_4_6" != node_cfg["lora_config"]["coding_rate"]) and \
+       ("CODING_4_7" != node_cfg["lora_config"]["coding_rate"]) and \
+       ("CODING_4_8" != node_cfg["lora_config"]["coding_rate"]):
+        raise ValueError
+
+    return True
 
 
 if __name__ == "__main__":
@@ -309,7 +419,7 @@ if __name__ == "__main__":
     flash_led(COLOUR_RED | COLOUR_GREEN)
 
     # TODO Add validation of JSON config file
-    # TODO Handle JSON errors more gracefully rather than hanging
+
     try:
         with open("lib/node_cfg.json") as cfg_file:
             node_cfg = json.load(cfg_file)
@@ -325,6 +435,21 @@ if __name__ == "__main__":
         flash_led(COLOUR_BLUE)
         if DEBUG_MODE:
             print("JSON config file loaded successfully")
+
+    try:
+        status = validate_config(node_cfg)
+    except KeyError:
+        while True:
+            flash_led(COLOUR_RED, times=3)
+            time.sleep(10)
+    except ValueError:
+        while True:
+            flash_led(COLOUR_RED, times=5)
+            time.sleep(10)
+    else:
+        flash_led(COLOUR_GREEN)
+        if DEBUG_MODE:
+            print("JSON config file validated")
 
     # ? Is there a better way to construct these, or move them to a separate
     # ? function which is easier to maintain?
@@ -358,15 +483,10 @@ if __name__ == "__main__":
     reserved_value = micropython.const(0x555555)
     message_length = micropython.const(0x02)
 
-    message_count = 0x00000000
-
     measure_interval = node_cfg["meas_interval_sec"]
     if DEBUG_MODE:
         print(measure_interval)
 
-    wlan_ssid = node_cfg["wifi_ssid"]
-    if DEBUG_MODE:
-        print(wlan_ssid)
     wlan_obj = WLAN(mode=WLAN.STA)
 
     lora_obj, lora_socket = open_lora_socket(node_cfg["lora_config"])

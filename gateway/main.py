@@ -59,6 +59,7 @@ def flash_led(colour: int = 0x0, period: float = 0.25, times: int = 3) -> None:
     Raises:
         Nothing
     """
+
     for _ in range(times):
         pycom.rgbled(colour)
         time.sleep(period)
@@ -93,12 +94,13 @@ def open_lora_socket(lora_config):
     Raises:
         Nothing
     """
-    if "True" == lora_config["tx_iq"]:
+
+    if "true" == lora_config["tx_iq"].lower():
         tx_iq = True
     else:
         tx_iq = False
 
-    if "True" == lora_config["rx_iq"]:
+    if "true" == lora_config["rx_iq"].lower():
         rx_iq = True
     else:
         rx_iq = False
@@ -116,9 +118,9 @@ def open_lora_socket(lora_config):
     )
 
     lora_socket = socket.socket(socket.AF_LORA, socket.SOCK_RAW)
-    lora_socket.setblocking(False)
+    lora_socket.setblocking(True)
 
-    return lora_obj, lora_socket
+    return (lora_obj, lora_socket)
 
 
 def sync_ntp_time(ntp_sync_cfg):
@@ -139,6 +141,7 @@ def sync_ntp_time(ntp_sync_cfg):
     Raises:
         Nothing
     """
+
     wlan_obj = WLAN(mode=WLAN.STA)
     wlan_obj.connect(
         ssid=ntp_sync_cfg["wifi_ssid"],
@@ -177,6 +180,11 @@ def setup_serial_port(serial_port_cfg):
     helper dictionaries used to convert the strings from a JSON file to the
     built-in numeric constants.
 
+    Note:
+        A more detailed description of what port parameters are and which are
+        needed, including restrictions on values, have a look at the Pycom's
+        website - https://docs.pycom.io/firmwareapi/pycom/machine/uart/
+
     Args:
         serial_port_cfg: A `Dict` with the port parameters
 
@@ -188,6 +196,7 @@ def setup_serial_port(serial_port_cfg):
     Raises:
         Nothing
     """
+
     bytesize = {"FIVEBITS": 5, "SIXBITS": 6, "SEVENBITS": 7, "EIGHTBITS": 8}
 
     parity = {
@@ -198,7 +207,7 @@ def setup_serial_port(serial_port_cfg):
 
     stopbits = {"STOPBITS_ONE": 1, "STOPBITS_TWO": 2}
 
-    if "None" == serial_port_cfg["timeout"]:
+    if "none" == serial_port_cfg["timeout"].lower():
         serial_port_cfg["timeout"] = 2
 
     serial_port = UART(
@@ -239,6 +248,7 @@ def construct_lora_pkg_format(lora_pkg_cfg):
     Raises:
         Nothing
     """
+
     header_fmt_string = "".join(
         [
             lora_pkg_cfg["node_id"],
@@ -271,7 +281,7 @@ def decode_lora_pkg(lora_pkg_cfg, lora_msg_buf_ptr):
         lora_pkg_cfg: A `Dict` describing the structure of a RAW LoRa packet
         lora_msg_buf_ptr: A `bytearray` or a `memoryview` into one, which
                           should contain a valid RAW LoRa packet as described
-                          by 'lora_pkg_cfg'.
+                          by `lora_pkg_cfg`.
 
     Returns:
         A dictionary containing the values for each of the RAW LoRa packet
@@ -280,6 +290,9 @@ def decode_lora_pkg(lora_pkg_cfg, lora_msg_buf_ptr):
     Raises:
         Nothing
     """
+
+    global OFFSETS
+
     lora_rx_data = {}
 
     for element in lora_pkg_cfg:
@@ -314,8 +327,8 @@ def construct_log_string(gateway_cfg, lora_rx_data, lora_stats):
 
     Args:
         gateway_cfg: A `Dict` with the gateway configuration. The fields that
-                     are actually used are the 'gateway_id' and the
-                     'serial_pkg_format' one, which specifies the order in
+                     are actually used are the `gateway_id` and the
+                     `serial_pkg_format` one, which specifies the order in
                      which to combine the individual fields.
         lora_rx_data: A `Dict` with the unpacked data from the most recently
                       received LoRa packet.
@@ -324,9 +337,10 @@ def construct_log_string(gateway_cfg, lora_rx_data, lora_stats):
 
     Returns:
         A string terminated with a newline character, consisting of all the
-        fields specified in the 'serial_pkg_format' and their corresponding
+        fields specified in the `serial_pkg_format` and their corresponding
         values.
     """
+
     serial_tx_data = []
 
     serial_tx_data.append(gateway_cfg["gateway_id"])
@@ -395,6 +409,7 @@ def on_lora_rx_packet(lora_msg_buf_ptr):
     Raises:
         Nothing
     """
+
     global lora_obj
     global lora_socket
     global lora_pkg_length
@@ -421,6 +436,135 @@ def on_lora_rx_packet(lora_msg_buf_ptr):
     machine.idle()
 
 
+def validate_config(gateway_cfg):
+    """Perform validation of JSON config file
+
+    This does a quick check if all necessary fields were present in the JSON
+    configuration file. There is also a series of checks if the values for the
+    LoRa configuration are correct. Perhaps overkill, but better safe than
+    sorry.
+
+    Args:
+        gateway_cfg: A `Dict` with the configuration settings for the LoRa node
+
+    Returns:
+        True if all checks pass
+
+    Raises:
+        KeyError: If at least one configuration parameter was not present
+        ValueError: If there is an incorrect value for the LoRa configuration,
+                    or if any of the other parameters were empty/null.
+    """
+
+    _MAIN_FIELDS = [
+        "gateway_id",
+        "ntp_sync_cfg",
+        "serial_port_config",
+        "serial_pkg_format",
+        "lora_config",
+        "lora_pkg_format"
+    ]
+
+    _LORA_FIELDS = [
+        "mode",
+        "region",
+        "frequency",
+        "tx_power",
+        "bandwidth",
+        "sf",
+        "coding_rate",
+        "tx_iq",
+        "rx_iq"
+    ]
+
+    _LORA_PKG_FIELDS = [
+        "node_id",
+        "message_type",
+        "reserved",
+        "message_cnt",
+        "message_len",
+        "info_payload",
+        "checksum"
+    ]
+
+    _SERIAL_PORT_FIELDS = [
+        "port",
+        "baudrate",
+        "bytesize",
+        "parity",
+        "stopbits",
+        "timeout",
+        "tx_pin",
+        "rx_pin"
+    ]
+
+    _NTP_FIELDS = [
+        "wifi_ssid",
+        "wifi_password",
+        "ntp_server"
+    ]
+
+    for field in _MAIN_FIELDS:
+        if field not in gateway_cfg:
+            raise KeyError
+        if gateway_cfg[field] is None:
+            raise ValueError
+
+    for field in _LORA_FIELDS:
+        if field not in gateway_cfg["lora_config"]:
+            raise KeyError
+        if gateway_cfg["lora_config"][field] is None:
+            raise ValueError
+
+    for field in _LORA_PKG_FIELDS:
+        if field not in gateway_cfg["lora_pkg_format"]:
+            raise KeyError
+        if gateway_cfg["lora_pkg_format"][field] is None:
+            raise ValueError
+
+    for field in _SERIAL_PORT_FIELDS:
+        if field not in gateway_cfg["serial_port_config"]:
+            raise KeyError
+        if gateway_cfg["serial_port_config"][field] is None:
+            raise ValueError
+
+    for field in _NTP_FIELDS:
+        if field not in gateway_cfg["ntp_sync_cfg"]:
+            raise KeyError
+        if gateway_cfg["ntp_sync_cfg"][field] is None:
+            raise ValueError
+
+    if "LORA" != gateway_cfg["lora_config"]["mode"]:
+        raise ValueError
+
+    if "EU868" != gateway_cfg["lora_config"]["region"]:
+        raise ValueError
+
+    if (863000000 > gateway_cfg["lora_config"]["frequency"]) or \
+       (870000000 < gateway_cfg["lora_config"]["frequency"]):
+        raise ValueError
+
+    if (2 > gateway_cfg["lora_config"]["tx_power"]) or \
+       (14 < gateway_cfg["lora_config"]["tx_power"]):
+        raise ValueError
+
+    if ("BW_125KHZ" != gateway_cfg["lora_config"]["bandwidth"]) and \
+       ("BW_250KHZ" != gateway_cfg["lora_config"]["bandwidth"]):
+        raise ValueError
+
+    if (7 > gateway_cfg["lora_config"]["sf"]) or \
+       (12 < gateway_cfg["lora_config"]["sf"]):
+        raise ValueError
+
+    if ("CODING_4_5" != gateway_cfg["lora_config"]["coding_rate"]) and \
+       ("CODING_4_6" != gateway_cfg["lora_config"]["coding_rate"]) and \
+       ("CODING_4_7" != gateway_cfg["lora_config"]["coding_rate"]) and \
+       ("CODING_4_8" != gateway_cfg["lora_config"]["coding_rate"]):
+        raise ValueError
+
+    return True
+
+
 if __name__ == "__main__":
     pycom.heartbeat(False)
 
@@ -431,7 +575,6 @@ if __name__ == "__main__":
     flash_led(COLOUR_RED | COLOUR_GREEN)
 
     # TODO Add validation of JSON config file
-    # TODO Handle JSON errors more gracefully rather than hanging
     try:
         with open("lib/gateway_cfg.json") as cfg_file:
             gateway_cfg = json.load(cfg_file)
@@ -447,6 +590,21 @@ if __name__ == "__main__":
         flash_led(COLOUR_BLUE)
         if DEBUG_MODE:
             print("JSON config file loaded successfully")
+
+    try:
+        status = validate_config(gateway_cfg)
+    except KeyError:
+        while True:
+            flash_led(COLOUR_RED, times=3)
+            time.sleep(10)
+    except ValueError:
+        while True:
+            flash_led(COLOUR_RED, times=5)
+            time.sleep(10)
+    else:
+        flash_led(COLOUR_GREEN)
+        if DEBUG_MODE:
+            print("JSON config file validated")
 
     # ? Is there a better way to construct these, or move them to a separate
     # ? function which is easier to maintain?
