@@ -27,16 +27,17 @@ from network import LoRa
 from lib import crc32
 
 
-# For diagnostic messages
+# * For diagnostic messages
 DEBUG_MODE = micropython.const(0x01)
 
-# LoPy4/FiPy use an RGB LED, where each colour is 0 - 255
+# * LoPy4/FiPy use an RGB LED, where each colour is 0 - 255
 COLOUR_RED = micropython.const(0xFF0000)
 COLOUR_GREEN = micropython.const(0x00FFF00)
 COLOUR_BLUE = micropython.const(0x0000FF)
 COLOUR_OFF = micropython.const(0x000000)
 
-message_count = 0x00000000
+MAX_PKG_LEN = micropython.const(0x100)
+message_count = 0x01
 
 
 def flash_led(colour: int = 0x0, period: float = 0.25, times: int = 3) -> None:
@@ -124,51 +125,46 @@ def open_lora_socket(lora_config):
     return (lora_obj, lora_socket)
 
 
-def construct_lora_pkg_format(lora_pkg_cfg):
-    """Constructs a representation of a RAW LoRa packet
+def calc_lora_pkg_size(lora_pkg_cfg, payload):
+    """Calculates the size of a LoRa packet to be transmitted
 
     This function is used to determine how many bytes a particular RAW LoRa
-    packet will consist of. Currently, the length in bytes of all fields is
-    fixed and is specified in the JSON configuration file. The function then
-    joins these together as a `struct.pack()` format string and uses
-    `struct.calcsize()` to determine the overall length.
+    packet will consist of. The function uses `struct.calcsize()` and format
+    strings specified in the JSON config file to determine the overall length.
 
     Note:
-        The way packets are constructed and handled *will* change in the
-        future to support variable-length ones, and to introduce additional
-        functionality.
+        This function has been renamed to reflect its new use. It now supports
+        variable-length payloads and is more universal.
 
     Args:
         lora_pkg_cfg: A `Dict` consisting of format strings indicating how
                       many bytes each field in the packet is.
+        payload: `bytes` or `bytearray` with the data to be send.
 
     Return:
-        An integer number, which currently does not change as the size of the
-        payload message is fixed. This will change in the future.
+        An integer number indicating the overall length of the LoRa packet
+        in bytes.
 
     Raises:
         Nothing
     """
 
-    header_fmt_string = "".join(
-        [
-            lora_pkg_cfg["node_id"],
-            lora_pkg_cfg["message_type"],
-            lora_pkg_cfg["reserved"],
-            lora_pkg_cfg["message_cnt"],
-            lora_pkg_cfg["message_len"],
-            lora_pkg_cfg["info_payload"],
-            lora_pkg_cfg["checksum"],
-        ]
-    )
+    pkg_length = 0
+    msg_len = len(payload)
 
-    pkg_length = struct.calcsize(header_fmt_string)
+    for field in lora_pkg_cfg:
+        if "info_payload" == field:
+            pkg_length += struct.calcsize(
+                lora_pkg_cfg[field].format(msg_length=msg_len)
+            )
+        else:
+            pkg_length += struct.calcsize(lora_pkg_cfg[field])
 
     return pkg_length
 
 
 def construct_lora_pkg(lora_pkg_cfg, lora_msg_buf, message_count, payload):
-    """Packs experiment data in a `bytearray` buffer to be sent over LoRa link
+    """Packs experiment data in a buffer to be sent over a LoRa link
 
     Some of the data changes between each LoRa packet, and therefore needs to
     be updated. This function reuses the same `bytearray` object and writes
@@ -186,7 +182,7 @@ def construct_lora_pkg(lora_pkg_cfg, lora_msg_buf, message_count, payload):
                       accommodate the `payload`.
         message_count: An `int`, currently 32-bit wide, serves as transmit
                        packet counter.
-        payload: *Currently* a `tuple` of two bytes. Will change in the future.
+        payload: A `bytes` or a `bytearray` object with all the measurements.
 
     Returns:
         The payload and the rest of the data are packed in-place in the
@@ -197,45 +193,47 @@ def construct_lora_pkg(lora_pkg_cfg, lora_msg_buf, message_count, payload):
         Nothing
     """
 
-    # * This adds padding zeroes for low values of `message_count` in order to
-    # * fill four bytes worth of data.
-    message_count_hex = "{:>08}".format(hex(message_count)[2:])
     struct.pack_into(
         lora_pkg_cfg["message_cnt"],
         lora_msg_buf,
         MSG_CNT_OFFSET,
-        *(binascii.unhexlify(message_count_hex)),
+        message_count,
     )
 
     msg_len = len(payload)
     struct.pack_into(
         lora_pkg_cfg["message_len"], lora_msg_buf, MSG_LEN_OFFSET, msg_len
     )
+
     struct.pack_into(
-        lora_pkg_cfg["info_payload"], lora_msg_buf, PAYLOAD_OFFSET, *payload
+        lora_pkg_cfg["info_payload"].format(msg_length=msg_len),
+        lora_msg_buf,
+        PAYLOAD_OFFSET,
+        *payload
     )
 
     # * The CRC32 checksum is calculated over the entire packet, including
     # * the packet counter. It is added at the end of the packet, making it
     # * reuseable in the future where the payload length will be variable.
     payload_checksum = crc32.crc32_compute(
-        lora_msg_buf[: -len(lora_pkg_cfg["checksum"])]
+        lora_msg_buf[: PAYLOAD_OFFSET + msg_len]
     )
     struct.pack_into(
         lora_pkg_cfg["checksum"],
         lora_msg_buf,
         PAYLOAD_OFFSET + msg_len,
-        *payload_checksum,
+        payload_checksum,
     )
 
 
-def measure_wifi_rssi(wlan_obj, wlan_ssid, missing_value):
+def measure_wlan_rssi(wlan_obj, wlan_ssid, missing_value):
     """Measures the RSSI of a specified WLAN SSID
 
     This is used as a rudimentary propagation measurement experiment. We meas-
     ure the Received Signal Strength Indicator (RSSI) of a specified WLAN, as
-    well as the channel that the SSID is advertised on. We do not have to be
-    connected to the WLAN to take those measurements.
+    well as the channel that the SSID is advertised on and the BSSID, or the
+    MAC of the AP. We do not have to be connected to the WLAN to take those
+    measurements.
 
     Args:
         wlan_obj: A `WLAN` class giving access to the WLAN radio on-board and
@@ -245,20 +243,31 @@ def measure_wifi_rssi(wlan_obj, wlan_ssid, missing_value):
                        WLAN SSID cannot be detected.
 
     Returns:
-        A `tuple` with the results of the measurements - the RSSI value and
-        the frequency channel. If the specified SSID is not found in the scan
-        results, a predefined value is returned.
+        A sequence of `bytes` which contains either the measured data or three
+        copies of the `missing_value` parameter.
 
     Raises:
         Nothing
     """
 
     wlan_networks = wlan_obj.scan()
+
     for wlan_network in wlan_networks:
         if wlan_ssid in wlan_network:
-            return (wlan_network.rssi, wlan_network.channel)
+            rssi = wlan_network.rssi
+            channel = wlan_network.channel
+            bssid = wlan_network.bssid
 
-    return (missing_value, missing_value)
+            meas_data = (
+                rssi.to_bytes(1, "little", True)
+                + channel.to_bytes(1, "little", False)
+                + bssid
+            )
+            break
+    else:
+        meas_data = bytes([missing_value, missing_value, missing_value])
+
+    return meas_data
 
 
 def run_experiment(lora_msg_buf_ptr):
@@ -289,8 +298,8 @@ def run_experiment(lora_msg_buf_ptr):
     global node_cfg
     global message_count
 
-    meas_data = measure_wifi_rssi(
-        wlan_obj, node_cfg["wifi_ssid"], node_cfg["meas_NA"]
+    meas_data = measure_wlan_rssi(
+        wlan_obj, node_cfg["wlan_ssid"], node_cfg["meas_NA"]
     )
     if DEBUG_MODE:
         print(meas_data)
@@ -298,12 +307,18 @@ def run_experiment(lora_msg_buf_ptr):
     construct_lora_pkg(
         node_cfg["lora_pkg_format"], lora_msg_buf_ptr, message_count, meas_data
     )
-    if DEBUG_MODE:
-        print(lora_msg_buf)
 
-    lora_socket.send(lora_msg_buf_ptr)
+    pkg_length = calc_lora_pkg_size(node_cfg["lora_pkg_format"], meas_data)
+
+    if DEBUG_MODE:
+        print(lora_msg_buf[:pkg_length])
+
+    lora_socket.send(lora_msg_buf_ptr[:pkg_length])
 
     message_count += 1
+
+    # * Visual feedback that the node is doing something
+    flash_led(COLOUR_GREEN, 0.1, 1)
 
     machine.idle()
 
@@ -330,7 +345,7 @@ def validate_config(node_cfg):
 
     _MAIN_FIELDS = [
         "node_id",
-        "wifi_ssid",
+        "wlan_ssid",
         "meas_interval_sec",
         "meas_NA",
         "lora_config",
@@ -351,8 +366,6 @@ def validate_config(node_cfg):
 
     _LORA_PKG_FIELDS = [
         "node_id",
-        "message_type",
-        "reserved",
         "message_cnt",
         "message_len",
         "info_payload",
@@ -417,13 +430,11 @@ def validate_config(node_cfg):
 if __name__ == "__main__":
     pycom.heartbeat(False)
 
-    # We do a lot of packing and assigning data to byte buffers, so it is
-    # prudent to proactively enable garbage collection.
+    # * We do a lot of packing and assigning data to byte buffers, so it is
+    # * prudent to proactively enable garbage collection.
     gc.enable()
 
     flash_led(COLOUR_RED | COLOUR_GREEN)
-
-    # TODO Add validation of JSON config file
 
     try:
         with open("lib/node_cfg.json") as cfg_file:
@@ -456,95 +467,65 @@ if __name__ == "__main__":
         if DEBUG_MODE:
             print("JSON config file validated")
 
-    # ? Is there a better way to construct these, or move them to a separate
-    # ? function which is easier to maintain?
+    # * Moved to `struct.calcsize` rather than `len` as a better, clearer way
+    # * Will keep them in the main for now
     NODE_ID_OFFSET = micropython.const(0x00)
-    MSG_TYPE_OFFSET = micropython.const(
-        NODE_ID_OFFSET + len(node_cfg["lora_pkg_format"]["node_id"])
-    )
-    RESERVED_OFFSET = micropython.const(
-        MSG_TYPE_OFFSET + len(node_cfg["lora_pkg_format"]["message_type"])
-    )
     MSG_CNT_OFFSET = micropython.const(
-        RESERVED_OFFSET + len(node_cfg["lora_pkg_format"]["reserved"])
+        NODE_ID_OFFSET
+        + struct.calcsize(node_cfg["lora_pkg_format"]["node_id"])
     )
     MSG_LEN_OFFSET = micropython.const(
-        MSG_CNT_OFFSET + len(node_cfg["lora_pkg_format"]["message_cnt"])
+        MSG_CNT_OFFSET
+        + struct.calcsize(node_cfg["lora_pkg_format"]["message_cnt"])
     )
     PAYLOAD_OFFSET = micropython.const(
-        MSG_LEN_OFFSET + len(node_cfg["lora_pkg_format"]["message_len"])
+        MSG_LEN_OFFSET
+        + struct.calcsize(node_cfg["lora_pkg_format"]["message_len"])
     )
 
     # ! Currently the node_id is constant throughout the duration of the
     # ! experiment, HOWEVER it could be variable in the future in case the
     # ! swarm members need reconfiguring.
-    node_id = micropython.const(binascii.unhexlify(node_cfg["node_id"]))
+    node_id = binascii.unhexlify(node_cfg["node_id"])
+    node_id = int.from_bytes(node_id, "big")
+    node_id = micropython.const(node_id)
     if DEBUG_MODE:
         print(node_id)
-
-    # ! These magic values will change as the protocol is improved and its
-    # ! functionality expanded
-    message_type = micropython.const(0xAA)
-    reserved_value = micropython.const(0x555555)
-    message_length = micropython.const(0x02)
 
     measure_interval = node_cfg["meas_interval_sec"]
     if DEBUG_MODE:
         print(measure_interval)
 
     wlan_obj = WLAN(mode=WLAN.STA)
-
     lora_obj, lora_socket = open_lora_socket(node_cfg["lora_config"])
 
-    # ! The radio is Tx ONLY just for this experiment. Will change.
+    # ! The radio on the node is Tx ONLY for this experiment
     lora_obj.power_mode(LoRa.TX_ONLY)
 
     if DEBUG_MODE:
         print("LoRa socket opened successfully")
 
-    lora_pkg_length = construct_lora_pkg_format(node_cfg["lora_pkg_format"])
-    if DEBUG_MODE:
-        print(lora_pkg_length)
-
-    # Use a `bytearray` as it is mutable and can reuse the same buffer
-    lora_msg_buf = bytearray(lora_pkg_length)
+    # * Use a `bytearray` for the LoRa packet as it is mutable and we can reuse
+    # * the same buffer. It is initialised to the maximum possible value, i.e.
+    # * 256 bytes, and then we can use indexing to only send what is necessary
+    lora_msg_buf = bytearray(MAX_PKG_LEN)
     lora_msg_buf_ptr = memoryview(lora_msg_buf)
 
     flash_led(COLOUR_BLUE)
 
-    # ? Is there a better way to construct these, or move them to a separate
-    # ? function which is easier to maintain?
-
-    # * Note the unpacking of multi-byte values and the tricks to go from
-    # * decimal integer to a multi-byte hexademical representation:
-    # * hex(int) -> '0xABCD' -> [2:] -> 'ABCD' -> binascii.unhexlify('ABCD')
-    # * -> b'\xAB\xCD'
-
     # ! The values below are constants for this particular experiment, so are
-    # ! only packed once. This will change in the future with the below being
+    # ! only packed once. This might change in the future with the below being
     # ! moved to the `construct_lora_pkg` function.
     struct.pack_into(
         node_cfg["lora_pkg_format"]["node_id"],
         lora_msg_buf,
         NODE_ID_OFFSET,
-        *node_id,
-    )
-    struct.pack_into(
-        node_cfg["lora_pkg_format"]["message_type"],
-        lora_msg_buf,
-        MSG_TYPE_OFFSET,
-        message_type,
-    )
-    struct.pack_into(
-        node_cfg["lora_pkg_format"]["reserved"],
-        lora_msg_buf,
-        RESERVED_OFFSET,
-        *(binascii.unhexlify(hex(reserved_value)[2:])),
+        node_id,
     )
 
     flash_led(COLOUR_GREEN)
 
-    run_experiment = machine.Timer.Alarm(
+    experiment = machine.Timer.Alarm(
         run_experiment, measure_interval, arg=lora_msg_buf_ptr, periodic=True
     )
 

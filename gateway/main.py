@@ -29,14 +29,17 @@ from network import LoRa
 from lib import crc32
 
 
-# For diagnostic messages
+# * For diagnostic messages
 DEBUG_MODE = micropython.const(0x01)
+USB_SERIAL = micropython.const(0x00)
 
-# LoPy4/FiPy use an RGB LED, where each colour is 0 - 255
+# * LoPy4/FiPy use an RGB LED, where each colour is 0 - 255
 COLOUR_RED = micropython.const(0xFF0000)
 COLOUR_GREEN = micropython.const(0x00FFF00)
 COLOUR_BLUE = micropython.const(0x0000FF)
 COLOUR_OFF = micropython.const(0x000000)
+
+MAX_PKG_LEN = micropython.const(0x100)
 
 
 def flash_led(colour: int = 0x0, period: float = 0.25, times: int = 3) -> None:
@@ -118,7 +121,7 @@ def open_lora_socket(lora_config):
     )
 
     lora_socket = socket.socket(socket.AF_LORA, socket.SOCK_RAW)
-    lora_socket.setblocking(True)
+    lora_socket.setblocking(False)
 
     return (lora_obj, lora_socket)
 
@@ -181,8 +184,8 @@ def setup_serial_port(serial_port_cfg):
     built-in numeric constants.
 
     Note:
-        A more detailed description of what port parameters are and which are
-        needed, including restrictions on values, have a look at the Pycom's
+        For a more detailed description of what port parameters are and which
+        are needed, including restrictions on values, have a look at the Pycom
         website - https://docs.pycom.io/firmwareapi/pycom/machine/uart/
 
     Args:
@@ -207,6 +210,7 @@ def setup_serial_port(serial_port_cfg):
 
     stopbits = {"STOPBITS_ONE": 1, "STOPBITS_TWO": 2}
 
+    # ! This is specific to the LoPy4/FiPy, and is the defaul serial timeout
     if "none" == serial_port_cfg["timeout"].lower():
         serial_port_cfg["timeout"] = 2
 
@@ -223,62 +227,20 @@ def setup_serial_port(serial_port_cfg):
     return serial_port
 
 
-def construct_lora_pkg_format(lora_pkg_cfg):
-    """Constructs a representation of a RAW LoRa packet
-
-    This function is used to determine how many bytes a particular RAW LoRa
-    packet will consist of. Currently, the length in bytes of all fields is
-    fixed and is specified in the JSON configuration file. The function then
-    joins these together as a `struct.pack()` format string and uses
-    `struct.calcsize()` to determine the overall length.
-
-    Note:
-        The way packets are constructed and handled *will* change in the
-        future to support variable-length ones, and to introduce additional
-        functionality.
-
-    Args:
-        lora_pkg_cfg: A `Dict` consisting of format strings indicating how
-                      many bytes each field in the packet is.
-
-    Return:
-        An integer number, which currently does not change as the size of the
-        payload message is fixed. This will change in the future.
-
-    Raises:
-        Nothing
-    """
-
-    header_fmt_string = "".join(
-        [
-            lora_pkg_cfg["node_id"],
-            lora_pkg_cfg["message_type"],
-            lora_pkg_cfg["reserved"],
-            lora_pkg_cfg["message_cnt"],
-            lora_pkg_cfg["message_len"],
-            lora_pkg_cfg["info_payload"],
-            lora_pkg_cfg["checksum"],
-        ]
-    )
-
-    pkg_length = struct.calcsize(header_fmt_string)
-
-    return pkg_length
-
-
-def decode_lora_pkg(lora_pkg_cfg, lora_msg_buf_ptr):
+def decode_lora_pkg(lora_pkg_cfg, payload_contents, lora_msg_buf_ptr):
     """Unpacks a LoRa packet into a dictionary
 
     The RAW LoRa packet is a sequence of `bytes` when received and needs to be
     unpacked, with multi-byte variables needing reconstruction.
 
     Note:
-        Currently this function assumes a fixed payload and does not perform
-        any length checks, nor CRC32 validation. This will change in the
-        future releases.
+        This function has been updated to work with a variable-length payload,
+        however CRC32 validation is still not performed. This will be added
+        when we transition to a proper data link layer protocol.
 
     Args:
         lora_pkg_cfg: A `Dict` describing the structure of a RAW LoRa packet
+        payload_contents: A `Dict` describing the payload contents
         lora_msg_buf_ptr: A `bytearray` or a `memoryview` into one, which
                           should contain a valid RAW LoRa packet as described
                           by `lora_pkg_cfg`.
@@ -288,26 +250,63 @@ def decode_lora_pkg(lora_pkg_cfg, lora_msg_buf_ptr):
         fields. Multi-byte ones are combined using the `from_bytes()` method.
 
     Raises:
-        Nothing
+        RuntimeError: If a malformed packet has been received and the payload
+                      length is not one of the predefined sizes and formats.
     """
 
     global OFFSETS
 
     lora_rx_data = {}
+    payload_data = {}
 
+    # * We need to find out how many bytes of data we have before we have the
+    # * CRC32 checksum bytes. Unlike the previous version, the `checksum`
+    # * offset is variable and needs to be recalculated every packet.
+    payload_size = struct.unpack_from(
+        lora_pkg_cfg["message_len"], lora_msg_buf_ptr, MSG_LEN_OFFSET
+    )
+    payload_size = payload_size[0]
+    if DEBUG_MODE:
+        print(payload_size)
+
+    OFFSETS["checksum"] = PAYLOAD_OFFSET + payload_size
+
+    # * The use of `8` and `3` as magic values is poor practice, however
+    # * this release has already taken far too long, and future plans will
+    # * not build on it anyway. Ideally there would be another function that
+    # * calculates the size for the different configurations of the payload.
+    if 8 == payload_size:
+        meas_state = "valid"
+    elif 3 == payload_size:
+        meas_state = "invalid"
+    else:
+        if DEBUG_MODE:
+            print(payload_size)
+        raise RuntimeError
+
+    # ! The payload is three values of different bit/byte length, so
+    # ! they should not be combined together. The payload length also
+    # ! varies depending on whether the WLAN to be measured had been
+    # ! in range or not.
     for element in lora_pkg_cfg:
-        lora_rx_data[element] = struct.unpack_from(
-            lora_pkg_cfg[element], lora_msg_buf_ptr, OFFSETS[element]
-        )
-
-        # ! The payload is two *separate* bytes for different things,
-        # ! therefore it should not be combined into a single number.
-        # ! This will change in the future as we move to variable-
-        # ! length payloads.
-        if element != "info_payload":
-            lora_rx_data[element] = int.from_bytes(
-                bytes(lora_rx_data[element]), "big"
+        if "info_payload" == element:
+            payload_field_offset = OFFSETS[element]
+            for payload_element in payload_contents["order"]:
+                payload_data[payload_element] = struct.unpack_from(
+                    payload_contents[meas_state][payload_element],
+                    lora_msg_buf_ptr,
+                    payload_field_offset,
+                )
+                payload_field_offset += struct.calcsize(
+                    payload_contents[meas_state][payload_element]
+                )
+        else:
+            lora_rx_data[element] = struct.unpack_from(
+                lora_pkg_cfg[element], lora_msg_buf_ptr, OFFSETS[element]
             )
+            lora_rx_data[element] = lora_rx_data[element][0]
+
+    lora_rx_data["info_payload"] = payload_data
 
     return lora_rx_data
 
@@ -361,11 +360,14 @@ def construct_log_string(gateway_cfg, lora_rx_data, lora_stats):
     lora_snr = str(lora_stats.snr)
     serial_tx_data.append(lora_snr)
 
-    wifi_rssi = str(lora_rx_data["info_payload"][0])
-    serial_tx_data.append(wifi_rssi)
+    wlan_rssi = str(lora_rx_data["info_payload"]["wlan_rssi"])
+    serial_tx_data.append(wlan_rssi)
 
-    wifi_chan = str(lora_rx_data["info_payload"][1])
-    serial_tx_data.append(wifi_chan)
+    wlan_chan = str(lora_rx_data["info_payload"]["wlan_channel"])
+    serial_tx_data.append(wlan_chan)
+
+    wlan_bssid = str(lora_rx_data["info_payload"]["wlan_bssid"])
+    serial_tx_data.append(wlan_bssid)
 
     for element in gateway_cfg["serial_pkg_format"]:
         if element in lora_rx_data and element != "info_payload":
@@ -412,27 +414,39 @@ def on_lora_rx_packet(lora_msg_buf_ptr):
 
     global lora_obj
     global lora_socket
-    global lora_pkg_length
     global gateway_cfg
 
-    lora_msg_buf_ptr = lora_socket.recv(lora_pkg_length)
+    lora_msg_buf_ptr = lora_socket.recv(MAX_PKG_LEN)
     lora_stats = lora_obj.stats()
 
-    lora_rx_data = decode_lora_pkg(
-        gateway_cfg["lora_pkg_format"], lora_msg_buf_ptr
-    )
+    # * Visual feedback that the node is doing something
+    flash_led(COLOUR_BLUE, 0.1, 1)
+
+    try:
+        lora_rx_data = decode_lora_pkg(
+            gateway_cfg["lora_pkg_format"],
+            gateway_cfg["payload_contents"],
+            lora_msg_buf_ptr,
+        )
+    except RuntimeError:
+        flash_led(COLOUR_RED, 0.1, 1)
+        return None
+
     if DEBUG_MODE:
         print(lora_rx_data)
 
     serial_tx_data = construct_log_string(
         gateway_cfg, lora_rx_data, lora_stats
     )
-    serial_tx_data = serial_tx_data.encode()
+    if USB_SERIAL:
+        print(serial_tx_data)
 
+    serial_tx_data = serial_tx_data.encode()
     serial_port.write(serial_tx_data)
     if DEBUG_MODE:
         print(serial_tx_data)
 
+    flash_led(COLOUR_GREEN, 0.1, 1)
     machine.idle()
 
 
@@ -463,6 +477,7 @@ def validate_config(gateway_cfg):
         "serial_pkg_format",
         "lora_config",
         "lora_pkg_format",
+        "payload_contents",
     ]
 
     _LORA_FIELDS = [
@@ -479,8 +494,6 @@ def validate_config(gateway_cfg):
 
     _LORA_PKG_FIELDS = [
         "node_id",
-        "message_type",
-        "reserved",
         "message_cnt",
         "message_len",
         "info_payload",
@@ -570,13 +583,12 @@ def validate_config(gateway_cfg):
 if __name__ == "__main__":
     pycom.heartbeat(False)
 
-    # We do a lot of packing and assigning data to byte buffers, so it is
-    # prudent to proactively enable garbage collection.
+    # * We do a lot of packing and assigning data to byte buffers, so it is
+    # * prudent to proactively enable garbage collection.
     gc.enable()
 
     flash_led(COLOUR_RED | COLOUR_GREEN)
 
-    # TODO Add validation of JSON config file
     try:
         with open("lib/gateway_cfg.json") as cfg_file:
             gateway_cfg = json.load(cfg_file)
@@ -608,35 +620,36 @@ if __name__ == "__main__":
         if DEBUG_MODE:
             print("JSON config file validated")
 
-    # ? Is there a better way to construct these, or move them to a separate
-    # ? function which is easier to maintain?
+    # * Moved to `struct.calcsize` rather than `len` as a better, clearer way
+    # * Will keep them in the main for now
     NODE_ID_OFFSET = micropython.const(0x00)
-    MSG_TYPE_OFFSET = micropython.const(
-        NODE_ID_OFFSET + len(gateway_cfg["lora_pkg_format"]["node_id"])
-    )
-    RESERVED_OFFSET = micropython.const(
-        MSG_TYPE_OFFSET + len(gateway_cfg["lora_pkg_format"]["message_type"])
-    )
     MSG_CNT_OFFSET = micropython.const(
-        RESERVED_OFFSET + len(gateway_cfg["lora_pkg_format"]["reserved"])
+        NODE_ID_OFFSET
+        + struct.calcsize(gateway_cfg["lora_pkg_format"]["node_id"])
     )
     MSG_LEN_OFFSET = micropython.const(
-        MSG_CNT_OFFSET + len(gateway_cfg["lora_pkg_format"]["message_cnt"])
+        MSG_CNT_OFFSET
+        + struct.calcsize(gateway_cfg["lora_pkg_format"]["message_cnt"])
     )
     PAYLOAD_OFFSET = micropython.const(
-        MSG_LEN_OFFSET + len(gateway_cfg["lora_pkg_format"]["message_len"])
+        MSG_LEN_OFFSET
+        + struct.calcsize(gateway_cfg["lora_pkg_format"]["message_len"])
     )
 
     OFFSETS = {
         "node_id": NODE_ID_OFFSET,
-        "message_type": MSG_TYPE_OFFSET,
-        "reserved": RESERVED_OFFSET,
         "message_cnt": MSG_CNT_OFFSET,
         "message_len": MSG_LEN_OFFSET,
         "info_payload": PAYLOAD_OFFSET,
     }
 
     sync_ntp_time(gateway_cfg["ntp_sync_cfg"])
+
+    serial_port = setup_serial_port(gateway_cfg["serial_port_config"])
+    if DEBUG_MODE:
+        print("UART port opened successfully")
+
+    flash_led(COLOUR_BLUE)
 
     lora_obj, lora_socket = open_lora_socket(gateway_cfg["lora_config"])
 
@@ -648,23 +661,8 @@ if __name__ == "__main__":
 
     flash_led(COLOUR_BLUE)
 
-    serial_port = setup_serial_port(gateway_cfg["serial_port_config"])
-    if DEBUG_MODE:
-        print("UART port opened successfully")
-
-    flash_led(COLOUR_BLUE)
-
-    lora_pkg_length = construct_lora_pkg_format(gateway_cfg["lora_pkg_format"])
-    if DEBUG_MODE:
-        print(lora_pkg_length)
-
-    CHECKSUM_OFFSET = micropython.const(
-        lora_pkg_length - len(gateway_cfg["lora_pkg_format"]["checksum"])
-    )
-    OFFSETS["checksum"] = CHECKSUM_OFFSET
-
-    # Use a `bytearray` as it is mutable and can reuse the same buffer
-    lora_msg_buf = bytearray(lora_pkg_length)
+    # * Use a `bytearray` as it is mutable and can reuse the same buffer
+    lora_msg_buf = bytearray(MAX_PKG_LEN)
     lora_msg_buf_ptr = memoryview(lora_msg_buf)
 
     flash_led(COLOUR_GREEN)

@@ -14,16 +14,8 @@ import micropython
 import struct
 
 
-CRC32_NUM_BYTES = micropython.const(4)
-
-# All of these are unsigned as the CRC32 value is never negative
-CRC32_PACK_FMT_SHORT = micropython.const(">H")
-CRC32_PACK_FMT_INT = micropython.const(">I")
-CRC32_PACK_FMT_LONG = micropython.const(">L")
-CRC32_PACK_FMT_LONG_LONG = micropython.const(">Q")
-
-# Pre-calculated using https://rosettacode.org/wiki/CRC-32#Procedural
-# Sadly Pycom's version of micropython does not have a built-in CRC32 routine
+# * Pre-calculated using https://rosettacode.org/wiki/CRC-32#Procedural
+# * Sadly Pycom's version of micropython does not have a built-in CRC32 routine
 CRC32_TABLE = micropython.const(
     [
         0x00000000,
@@ -286,7 +278,7 @@ CRC32_TABLE = micropython.const(
 )
 
 
-def crc32_compute(data: bytes, crc32_checksum: int = 0) -> bytes:
+def crc32_compute(data: bytes, crc32_checksum: int = 0) -> int:
     """Calculates a CRC32 chekcsum on input data
 
     Uses standard CRC32 algorithm, pinched from
@@ -298,8 +290,7 @@ def crc32_compute(data: bytes, crc32_checksum: int = 0) -> bytes:
         crc32_checksum: The starting value of the checksum, 0 by default
 
     Returns:
-        The computed checksum, in the form of a sequence of bytes, obtained
-        by packing the single integer value through `struct.pack()`.
+        The computed checksum, in the form of a single number.
 
     Raises:
         Nothing
@@ -314,42 +305,4 @@ def crc32_compute(data: bytes, crc32_checksum: int = 0) -> bytes:
 
     crc32_checksum ^= 0xFFFFFFFF
 
-    crc32_checksum = struct.pack(pick_fmt_string(), crc32_checksum)
-
     return crc32_checksum
-
-
-def pick_fmt_string() -> str:
-    """Picks correct format specifier for struct packing a CRC32 checksum
-
-    This is a 'better safe than sorry' function which also helps with future
-    portability of this code. Rather than assuming the bit length of different
-    integer types, it is calculated at runtime.
-
-    TODO: Refactor and make more universal
-
-    Args:
-        None
-
-    Returns:
-        A constant string for a subsequent call to `struct.pack()`. Correctly
-        identifies whether a 4-byte CRC32 checksum will fit into a `short`,
-        an `int`, or a `long`.
-
-    Raises:
-        RuntimeError: On the off chance the architecture running the code does
-        not support 4-byte integer variables.
-    """
-
-    if struct.calcsize(CRC32_PACK_FMT_SHORT) == CRC32_NUM_BYTES:
-        fmt_string = CRC32_PACK_FMT_SHORT
-    elif struct.calcsize(CRC32_PACK_FMT_INT) == CRC32_NUM_BYTES:
-        fmt_string = CRC32_PACK_FMT_INT
-    elif struct.calcsize(CRC32_PACK_FMT_LONG) == CRC32_NUM_BYTES:
-        fmt_string = CRC32_PACK_FMT_LONG
-    elif struct.calcsize(CRC32_PACK_FMT_LONG_LONG) == CRC32_NUM_BYTES:
-        fmt_string = CRC32_PACK_FMT_LONG_LONG
-    else:
-        raise RuntimeError("Unable to find suitable integer type")
-
-    return fmt_string

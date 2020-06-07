@@ -1,7 +1,7 @@
 {
     "node_id": "AA09",
 
-    "wifi_ssid": "BTHub5-TQH5",
+    "wlan_ssid": "BTHub5-TQH5",
     "meas_interval_sec": 60,
     "meas_NA": 127,
 
@@ -18,12 +18,10 @@
     },
 
     "lora_pkg_format": {
-        "node_id": "BB",
-        "message_type": "B",
-        "reserved": "BBB",
-        "message_cnt": "BBBB",
-        "message_len": "B",
-        "info_payload": "bb",
-        "checksum": "BBBB"
+        "node_id": "!H",
+        "message_cnt": "!L",
+        "message_len": "!B",
+        "info_payload": "!{msg_length}B",
+        "checksum": "!L"
     }
 }

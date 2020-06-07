@@ -1,3 +1,4 @@
 .vscode/
 pymakr*
 images/
+**/.mypy_cache/
