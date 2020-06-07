@@ -36,33 +36,33 @@ The code uses Pycom's version of `MicroPython` which does not contain **all** fu
 - ARM is `little-endian` and the implemented `int.to_bytes()` method does not support `big-endian` mode. However, both everything else is `big-endian`, which has led to an extensive use of the `binascii` and `struct` modules.
 - CRC32 is not implemented, so I had to include a separate file in `lib/` which does that.
 - The maximum size of a `LoRa` packet is 256 bytes, as the packet length indicator in the PHY layer is 8 bits wide.
+- Using the Pymakr Expansion Board as a way to connect to a serial port is not advised, as the REPL and debug messages are output there. If you do want to do it this way, set `DEBUG_MODE` to `0` and `USB_SERIAL` to `1` in the `gateway/main.py` file.
 
-The packet structures described in the various JSON files are subject to change as the work on custom PHY and MAC protocols progresses.
+The packet structures described in the various JSON files are ~~subject to change as the work on custom PHY and MAC protocols progresses~~ fixed for this experiment and this experiment only. Work on future functionality, such as making this wireless connectivity option available to other robot subsystems will be moved to a different repo. The current plan is to use DASH7 for the MAC layer over the LoRa PHY one.
 
 ### Packet format
 
-As mentioned above, this is preliminary and is subject to change as work progresses. However, currently, the packet format sent over the `LoRa` radio link is, with `msg` short for `message` and `cnt` short for `count`:
+As mentioned above, this is ~~preliminary and is subject to change as work progresses~~ fixed for the purposes of measuring the propagation along the pipe. The packet format sent over the `LoRa` radio link is, with `msg` short for `message` and `cnt` short for `count`:
 ```
-+---------+----------+----------+---------+---------+---------+-------+
-| node_id | msg_type | reserved | msg_cnt | msg_len | payload | CRC32 |
-+---------+----------+----------+---------+---------+---------+-------+
++---------+----------+----------+---------+-------+
+| node_id | msg_cnt  | msg_len  | payload | CRC32 |
++---------+----------+----------+---------+-------+
 ```
 The fields are as follows:
 - `node_id` - Two byte unsigned integer. Identifies the transmitter.
-- `msg_type` - One byte unsigned integer. Currently has a fixed magical value of `0xAA`. In the future can be used to differentiate where the `payload` originated from, whether the `payload` is useful data, telemetry, or link control.
-- `reserved` - Three unsigned bytes. In case we have missed something and need to add more functionality.
 - `msg_cnt` - Four byte unsigned integer. Will be used to keep track of lost packets and request re-transmission.
 - `msg_len` - One byte unsigned integer. The length in bytes of the `payload` field.
-- `payload` - **_Currently_** two signed bytes, one for the WLAN RSSI and one for the WLAN channel. **_Will_** change to support more data, up to 241 bytes. The reason for this seemingly random number is that the `LoRa` PHY packet accepts a payload of no more than 256 bytes.
+- `payload` - Variable length data. If the Wi-Fi SSID is within range, it consists of eight bytes - one for the RSSI value, one for the channel number, and six for the AP's MAC address, or BSSID. If not, it is three bytes, each having the `meas_NA` value specified in the JSON config file.
 - `CRC32` - Four byte unsigned integer. A CRC32 checksum.
 
 ## TO DO
-- More checks and validations of various inputs and loaded files such as:
-  - Whether all fields are present
-  - Whether the values for those are valid
-  - Type checking of inputs
-- Better error handling - potentially load a default configuration and issue an error message rather than hang up in an infinite loop
-- Improve functionality to allow a variable-length payload
+- ~~More checks and validations of various inputs and loaded files such as:~~
+  - ~~Whether all fields are present~~
+  - ~~Whether the values for those are valid~~
+  - ~~Type checking of inputs~~
+  - All of the above are now implemented
+- ~~Better error handling - potentially load a default configuration and issue an error message rather than hang up in an infinite loop~~ -> Infinite loop actually makes the most sense, so that is how the nodes will perform in case of an error
+- ~~Improve functionality to allow a variable-length payload~~ -> done!
 - Create an API to enable transparent use of the LoPy4/FiPy boards by other Themes
 - Add unit and integration testing - difficult due to need for extensive mocking
 - Add CI for `Black` and `Bandit`

@@ -1,5 +1,5 @@
 {
-    "gateway_id": "BB10",
+    "gateway_id": "BB08",
 
     "ntp_sync_cfg": {
         "wifi_ssid": "BTHub5-TQH5",
@@ -24,11 +24,10 @@
         "lora_rx_time",
         "lora_rssi",
         "lora_snr",
-        "wifi_rssi",
-        "wifi_chan",
+        "wlan_rssi",
+        "wlan_chan",
+        "wlan_bssid",
         "node_id",
-        "message_type",
-        "reserved",
         "message_cnt",
         "message_len",
         "checksum"
@@ -47,12 +46,28 @@
     },
 
     "lora_pkg_format": {
-        "node_id": "BB",
-        "message_type": "B",
-        "reserved": "BBB",
-        "message_cnt": "BBBB",
-        "message_len": "B",
-        "info_payload": "bb",
-        "checksum": "BBBB"
+        "node_id": "!H",
+        "message_cnt": "!L",
+        "message_len": "!B",
+        "info_payload": "!{msg_length}B",
+        "checksum": "!L"
+    },
+
+    "payload_contents": {
+        "order": [
+            "wlan_rssi",
+            "wlan_channel",
+            "wlan_bssid"
+        ],
+        "valid": {
+            "wlan_rssi": "<b",
+            "wlan_channel": "<B",
+            "wlan_bssid": "!6B"
+        },
+        "invalid": {
+            "wlan_rssi": "<b",
+            "wlan_channel": "<b",
+            "wlan_bssid": "<b"
+        }
     }
 }
